@@ -6,6 +6,12 @@ from pathlib import Path
 import streamlit as st
 import openai
 
+from io import BytesIO
+
+ALLOWED_EXTENSIONS = {
+    ".pdf", ".txt", ".md", ".docx", ".csv", ".xlsx"
+}
+
 # Load API key
 openai.api_key = st.secrets['openai']["OPENAI_API_KEY"]
 
@@ -18,6 +24,9 @@ SUPPORTED_EXTENSIONS = {
     ".jpeg", ".jpg", ".js", ".json", ".md", ".pdf", ".php", ".pkl", ".png", ".pptx",
     ".py", ".rb", ".tar", ".tex", ".ts", ".txt", ".webp", ".xlsx", ".xml", ".zip"
 }
+
+
+
 
 # Load/save config for persistent assistant and vector store
 def load_config():
@@ -67,8 +76,15 @@ def initialize_assistant_and_vector_store():
 
     return assistant.id, vs_id
 
+
+
 # Start the assistant and vector store (only once)
 assistant_id, vector_store_id = initialize_assistant_and_vector_store()
+
+
+
+
+
 
 # Create a new thread per session
 if "thread_id" not in st.session_state:
@@ -79,8 +95,8 @@ if "thread_id" not in st.session_state:
     st.session_state.chat_history = []
 
 # UI Layout
-st.set_page_config(page_title="Company RAG Assistant", layout="wide")
-st.title("📄 Ask Your Company Documents")
+st.set_page_config(page_title="MI RAG Assistant", layout="wide")
+st.title("📄 Ask About MI Documents")
 
 user_input = st.chat_input("Ask your question...")
 
@@ -118,3 +134,81 @@ if user_input:
 for msg in st.session_state.chat_history:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
+
+
+
+
+with st.sidebar:
+    st.header("🧠 Assistant File Manager")
+
+    st.subheader("📁 Files in Use")
+
+    files = openai.vector_stores.files.list(vector_store_id=vector_store_id)
+    existing_filenames = {
+        openai.files.retrieve(f.id).filename
+        for f in files.data
+    }
+    for f in files.data:
+        file_info = openai.files.retrieve(f.id)
+        st.markdown(f"- `{file_info.filename}`")
+
+    st.divider()
+
+    st.subheader("➕ Upload New Files")
+    
+    # 👇 Dynamic key to reset uploader after rerun
+    upload_key = st.session_state.get("upload_key", 0)
+    
+    uploaded_files = st.file_uploader(
+        "Choose one or more files",
+        type=[ext[1:] for ext in ALLOWED_EXTENSIONS],
+        accept_multiple_files=True,
+        key=f"uploader_{upload_key}"
+    )
+    
+    if uploaded_files:
+        new_files = [
+            (f.name, BytesIO(f.read()))
+            for f in uploaded_files
+            if f.name not in existing_filenames
+        ]
+    
+        if new_files:
+            with st.spinner("Uploading and indexing new files..."):
+                openai.vector_stores.file_batches.upload_and_poll(
+                    vector_store_id=vector_store_id,
+                    files=new_files
+                )
+            st.success(f"✅ Uploaded {len(new_files)} new file(s).")
+        else:
+            st.info("All selected files were already uploaded.")
+    
+        # ✅ Reset file_uploader input
+        st.session_state["upload_key"] = upload_key + 1
+        st.rerun()
+
+
+
+
+    st.divider()
+
+    st.subheader("❌ Delete a File")
+
+    file_choices = files.data
+
+    if file_choices:
+        file_to_delete = st.selectbox(
+            "Select a file to remove",
+            options=file_choices,
+            format_func=lambda f: openai.files.retrieve(f.id).filename
+        )
+
+        if st.button("Delete selected file"):
+            openai.vector_stores.files.delete(
+                vector_store_id=vector_store_id,
+                file_id=file_to_delete.id
+            )
+            st.success("Deleted successfully.")
+            st.rerun()
+    else:
+        st.info("No files to delete.")
