@@ -285,7 +285,6 @@ with st.sidebar:
     cfg = load_config()
     saved_model = cfg.get("responses_model", DEFAULT_MODEL)
     saved_mode = cfg.get("retrieval_mode", "docs_only")
-    saved_show_chunks = cfg.get("show_chunks", False)
 
     model_choice = st.selectbox(
         "OpenAI model",
