@@ -305,13 +305,9 @@ with st.sidebar:
         horizontal=False
     )[0]
 
-    show_chunks = st.checkbox(
-        "Show top retrieved chunks (from your files)",
-        value=bool(saved_show_chunks),
-        help="When enabled, shows the top quoted snippets retrieved from your uploaded documents."
-    )
+    show_chunks = True
 
-    if (model_choice != saved_model) or (retrieval_mode != saved_mode) or (show_chunks != saved_show_chunks):
+    if (model_choice != saved_model) or (retrieval_mode != saved_mode):
         cfg["responses_model"] = model_choice
         cfg["retrieval_mode"] = retrieval_mode
         cfg["show_chunks"] = bool(show_chunks)
