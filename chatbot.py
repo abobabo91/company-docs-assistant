@@ -318,6 +318,8 @@ with st.sidebar:
     # Ensure persistent vector store before listing
     vector_store_id = ensure_vector_store()
 
+    st.divider()
+    
     st.subheader("📁 Files in Use")
     try:
         files = client.vector_stores.files.list(vector_store_id=vector_store_id)
@@ -333,7 +335,6 @@ with st.sidebar:
         files = None
         existing_filenames = set()
 
-    st.divider()
 
     st.subheader("➕ Upload New Files")
 
@@ -366,7 +367,6 @@ with st.sidebar:
         st.session_state["upload_key"] = upload_key + 1
         st.rerun()
 
-    st.divider()
 
     st.subheader("❌ Delete a File")
 
