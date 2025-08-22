@@ -314,7 +314,6 @@ with st.sidebar:
         save_config(cfg)
 
     # ---- File Manager (ALWAYS visible; lives in the same sidebar block) ----
-    st.header("🧠 Assistant File Manager")
 
     # Ensure persistent vector store before listing
     vector_store_id = ensure_vector_store()
