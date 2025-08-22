@@ -135,6 +135,28 @@ def build_tools(mode: str, vector_store_id: str) -> List[Dict[str, Any]]:
         tools.append({"type": "web_search"})
     return tools
 
+import hashlib
+
+def sha256_bytes(data: bytes) -> str:
+    h = hashlib.sha256()
+    h.update(data)
+    return h.hexdigest()
+
+def get_vs_name_to_ids(vector_store_id: str) -> Dict[str, List[str]]:
+    """
+    Build {filename: [file_id, ...]} for files currently attached to the vector store.
+    """
+    name_to_ids: Dict[str, List[str]] = {}
+    try:
+        vs_files = client.vector_stores.files.list(vector_store_id=vector_store_id)
+        for ref in vs_files.data:
+            info = client.files.retrieve(ref.id)
+            name_to_ids.setdefault(info.filename, []).append(ref.id)
+    except Exception:
+        pass
+    return name_to_ids
+
+
 def extract_sources_and_quotes(final_response) -> Tuple[List[Dict[str, str]], List[Dict[str, str]]]:
     """
     Best-effort extraction of:
@@ -336,36 +358,79 @@ with st.sidebar:
         existing_filenames = set()
 
 
-    st.subheader("➕ Upload New Files")
-
+    st.subheader("➕ Upload / Replace Files")
+    
+    # Optional switch: control whether we delete old file objects from global storage too
+    delete_old_file_objects = st.toggle("Delete old copies from OpenAI storage", value=True,
+                                        help="If on, the old file objects are removed from your OpenAI Files as well.")
+    
     upload_key = st.session_state.get("upload_key", 0)
-
+    
     uploaded_files = st.file_uploader(
         "Choose one or more files",
         type=[ext[1:] for ext in ALLOWED_EXTENSIONS],
         accept_multiple_files=True,
         key=f"uploader_{upload_key}"
     )
-
-    if uploaded_files and files is not None:
-        new_files = [
-            (f.name, BytesIO(f.read()))
-            for f in uploaded_files
-            if f.name not in existing_filenames
-        ]
-
-        if new_files:
-            with st.spinner("Uploading and indexing new files..."):
+    
+    if uploaded_files:
+        # Build current index from vector store
+        name_to_ids = get_vs_name_to_ids(vector_store_id)
+    
+        # Optional: persistent content index to avoid re-uploading identical content
+        cfg = load_config()
+        file_index: Dict[str, Dict[str, str]] = cfg.setdefault("file_index", {})  # {filename: {"file_id": "...", "sha256": "..."}}
+    
+        added, replaced, skipped = 0, 0, 0
+    
+        for uf in uploaded_files:
+            fname = uf.name
+            raw = uf.getvalue()
+            new_hash = sha256_bytes(raw)
+    
+            # Skip if identical content (based on our local hash index)
+            prev_meta = file_index.get(fname)
+            if prev_meta and prev_meta.get("sha256") == new_hash:
+                skipped += 1
+                continue
+    
+            # If a file with the same name exists in the vector store, remove it first
+            existing_ids = name_to_ids.get(fname, [])
+            for old_id in existing_ids:
+                try:
+                    client.vector_stores.files.delete(vector_store_id=vector_store_id, file_id=old_id)
+                except Exception as e:
+                    st.warning(f"Could not detach old {fname} from vector store: {e}")
+                if delete_old_file_objects:
+                    try:
+                        client.files.delete(old_id)
+                    except Exception as e:
+                        st.warning(f"Could not delete old file object {old_id}: {e}")
+    
+            # Upload and index the new file (single-file batch)
+            with st.spinner(f"Uploading {fname}…"):
                 client.vector_stores.file_batches.upload_and_poll(
                     vector_store_id=vector_store_id,
-                    files=new_files
+                    files=[(fname, BytesIO(raw))]
                 )
-            st.success(f"✅ Uploaded {len(new_files)} new file(s).")
-        else:
-            st.info("All selected files were already uploaded.")
-
+    
+            # Update our local indices
+            # (Re-list to find the brand new file_id for this filename)
+            name_to_ids = get_vs_name_to_ids(vector_store_id)
+            new_ids = name_to_ids.get(fname, [])
+            new_id = new_ids[-1] if new_ids else None
+            file_index[fname] = {"file_id": new_id or "", "sha256": new_hash}
+    
+            if existing_ids:
+                replaced += 1
+            else:
+                added += 1
+    
+        save_config(cfg)
+        st.success(f"Done. Added {added}, replaced {replaced}, skipped {skipped} identical.")
         st.session_state["upload_key"] = upload_key + 1
         st.rerun()
+
 
 
     st.subheader("❌ Delete a File")
