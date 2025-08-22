@@ -43,7 +43,7 @@ MODEL_CHOICES = [
     "gpt-4o",
     "gpt-4o-mini",
 ]
-DEFAULT_MODEL = "gpt-4o"
+DEFAULT_MODEL = "gpt-5-nano"
 
 
 # =========================
